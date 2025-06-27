@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI ถามตอบรายงานการซ่อมวาล์ว</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6; /* Light gray background */
+        }
+        /* Custom scrollbar for text areas */
+        textarea::-webkit-scrollbar {
+            width: 8px;
+        }
+        textarea::-webkit-scrollbar-track {
+            background: #e0e0e0;
+            border-radius: 10px;
+        }
+        textarea::-webkit-scrollbar-thumb {
+            background: #888;
+            border-radius: 10px;
+        }
+        textarea::-webkit-scrollbar-thumb:hover {
+            background: #555;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+    <div class="bg-white p-8 rounded-xl shadow-lg w-full max-w-3xl">
+        <h1 class="text-3xl font-bold text-center text-gray-800 mb-6">AI ถามตอบรายงานการซ่อมวาล์ว</h1>
+
+        <!-- Status/Loading Area -->
+        <div id="statusMessage" class="text-center text-sm text-gray-600 mb-4">
+            กำลังโหลดข้อมูลรายงาน...
+        </div>
+
+        <!-- Question Input -->
+        <div class="mb-6">
+            <label for="questionInput" class="block text-gray-700 text-sm font-medium mb-2">
+                พิมพ์คำถามของคุณ:
+            </label>
+            <textarea id="questionInput" rows="4" 
+                      class="w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition duration-200 resize-y"
+                      placeholder="เช่น วาล์ว Tag No. 463HV404A มีอาการเสียที่ Stem อย่างไร และมีการแก้ไขอย่างไร? หรือ ปัญหาการรั่วไหลของวาล์วที่พบบ่อยคืออะไร?"></textarea>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="flex justify-center space-x-4 mb-6">
+            <button id="askButton" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-75 disabled:opacity-50 disabled:cursor-not-allowed">
+                ถาม AI
+            </button>
+            <button id="clearButton" 
+                    class="bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold py-3 px-6 rounded-lg shadow-md transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-gray-500 focus:ring-opacity-75">
+                ล้าง
+            </button>
+        </div>
+
+        <!-- AI Response Area -->
+        <div>
+            <label for="aiResponse" class="block text-gray-700 text-sm font-medium mb-2">
+                คำตอบจาก AI:
+            </label>
+            <textarea id="aiResponse" rows="8" readonly
+                      class="w-full p-3 border border-gray-300 rounded-lg bg-gray-50 focus:outline-none resize-y text-gray-800"></textarea>
+        </div>
+    </div>
+
+    <script>
+        // **สำคัญ:** แทนที่ด้วย Web app URL ที่คุณ Deploy ได้จาก Google Apps Script
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyw5DaYpSA2AZQyF4Mj2x_7eLRAWtXPncvwTUSsNFXE-hlHMa7wn1wIJFuywCn8G5GGIg/exec";
+
+        let allReports = []; // เก็บข้อมูลรายงานทั้งหมดจาก Google Sheet
+        const questionInput = document.getElementById('questionInput');
+        const askButton = document.getElementById('askButton');
+        const clearButton = document.getElementById('clearButton');
+        const aiResponse = document.getElementById('aiResponse');
+        const statusMessage = document.getElementById('statusMessage');
+
+        /**
+         * แสดงข้อความสถานะและจัดการปุ่ม/อินพุต
+         * @param {string} message ข้อความที่จะแสดง
+         * @param {boolean} isLoading true ถ้าอยู่ในสถานะกำลังโหลด
+         */
+        function setStatus(message, isLoading = false) {
+            statusMessage.textContent = message;
+            askButton.disabled = isLoading;
+            questionInput.disabled = isLoading;
+            clearButton.disabled = isLoading;
+            if (isLoading) {
+                askButton.textContent = 'กำลังประมวลผล...';
+                askButton.classList.add('animate-pulse');
+            } else {
+                askButton.textContent = 'ถาม AI';
+                askButton.classList.remove('animate-pulse');
+            }
+        }
+
+        /**
+         * ดึงข้อมูลรายงานทั้งหมดจาก Google Sheet ผ่าน Apps Script Web App
+         */
+        async function fetchReports() {
+            setStatus("กำลังโหลดข้อมูลรายงาน...", true);
+            try {
+                const payload = { action: "getAllReports" };
+                const response = await fetch(WEB_APP_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                // ตรวจสอบว่า response.ok (status 200-299) หรือไม่
+                if (!response.ok) {
+                    // หากไม่ OK ให้พยายามอ่านข้อความ error จาก response
+                    const errorText = await response.text();
+                    console.error("HTTP error during fetchReports:", response.status, errorText);
+                    throw new Error(`HTTP error! Status: ${response.status}. Response: ${errorText.substring(0, 100)}...`);
+                }
+
+                const data = await response.json();
+
+                if (data.status === 'success' && data.data) {
+                    allReports = data.data;
+                    setStatus(`โหลดข้อมูลรายงานสำเร็จ ${allReports.length} รายการ`);
+                } else {
+                    // กรณีที่ Apps Script ส่ง status: 'error' กลับมา
+                    setStatus(`ข้อผิดพลาดในการโหลดข้อมูล: ${data.message || 'ไม่ทราบข้อผิดพลาด'}`, false);
+                }
+            } catch (error) {
+                console.error("Error fetching all reports:", error);
+                setStatus(`ข้อผิดพลาดในการเชื่อมต่อ: ${error.message}`, false);
+            }
+        }
+
+        /**
+         * ประมวลผลคำถามและเตรียม Context Data สำหรับ AI
+         * @param {string} question คำถามจากผู้ใช้
+         * @param {Array<Object>} reports ข้อมูลรายงานทั้งหมด
+         * @returns {string} Context Data ที่เตรียมไว้
+         */
+        function processQuestionAndGetContext(question, reports) {
+            let specificTagNo = null;
+            // ใช้ Regular Expression เพื่อค้นหา Tag No. ที่มีรูปแบบคล้าย 'CVXXXXXXX-XXX' หรือ 'XXXAXXAXXX' หรือ 'PV-XXXX' หรือ 'XXXXX'
+            const tagNoMatch = question.match(/([A-Z0-9]{3,}[A-Z0-9]{1,}[A-Z0-9]{3,}|CV\d{7}-\d{3}|PV-\d{4})/i);
+            if (tagNoMatch) {
+                specificTagNo = tagNoMatch[0];
+                console.log(`Detected specific Tag No. in question: ${specificTagNo}`);
+            }
+
+            // แยกคำหลักจากคำถาม (ไม่รวมคำทั่วไป)
+            const stopWords = [
+                "มี", "อะไร", "บ้าง", "และ", "คือ", "การ", "ของ", "ที่", "ประเภท", 
+                "อย่างไร", "ใน", "ทั้งหมด", "รายงาน", "ซ่อม", "จง", "โปรด", "วาล์ว", "tag", "no"
+            ];
+            const keywordsFromQuestion = question.split(/\s+/)
+                .filter(word => word.length > 2 && !stopWords.includes(word.toLowerCase()))
+                .map(word => word.toLowerCase());
+            
+            if (specificTagNo) {
+                keywordsFromQuestion.push(specificTagNo.toLowerCase());
+            }
+            console.log("Keywords for search:", keywordsFromQuestion);
+
+            const contextDataList = [];
+            const maxContextReports = 5; // จำกัดจำนวนรายงานสูงสุดที่จะส่งเป็น context
+            
+            for (const report of reports) {
+                // สร้างข้อความรวมของข้อมูลในรายงานเพื่อใช้ในการค้นหา (รวมทุกคอลัมน์)
+                let reportTextForSearch = "";
+                for (const key in report) {
+                    if (report.hasOwnProperty(key) && report[key] && String(report[key]).trim() !== 'N/A' && String(report[key]).trim() !== '') {
+                        reportTextForSearch += ` ${key}: ${report[key]}`;
+                    }
+                }
+                reportTextForSearch = reportTextForSearch.toLowerCase();
+
+                let isRelevant = false;
+                if (specificTagNo && reportTextForSearch.includes(specificTagNo.toLowerCase())) {
+                    isRelevant = true; // ถ้ามี Tag No. ตรงกัน ถือว่าเกี่ยวข้องทันที
+                } else if (!specificTagNo) { // ถ้าไม่มี Tag No. เฉพาะเจาะจงในคำถาม ให้ค้นหาด้วย keywords ทั่วไป
+                    for (const keyword of keywordsFromQuestion) {
+                        if (reportTextForSearch.includes(keyword)) {
+                            isRelevant = true;
+                            break;
+                        }
+                    }
+                }
+                
+                if (isRelevant) {
+                    // สร้าง context data ที่ AI จะใช้ (เน้นข้อมูลสำคัญที่ AI ควรเห็น)
+                    const symptomsParts = [];
+                    for (const key in report) {
+                        if (key.startsWith('Comment Part ') && report[key] && String(report[key]).trim() !== 'N/A' && String(report[key]).trim() !== '') {
+                            symptomsParts.push(`${key.replace('Comment Part ', '')}: ${report[key]}`);
+                        }
+                    }
+                    const symptomsStr = symptomsParts.length > 0 ? symptomsParts.join(", ") : "N/A";
+
+                    const actionsParts = [];
+                    for (const key in report) {
+                        if (key.startsWith('Part ') && !key.startsWith('Part Diaphragm') && !key.startsWith('Part Positioner') && !key.startsWith('Part Actuator') && report[key] && String(report[key]).trim() !== 'N/A' && String(report[key]).trim() !== '') {
+                            actionsParts.push(`${key.replace('Part ', '')}: ${report[key]}`);
+                        }
+                    }
+                    const actionsStr = actionsParts.length > 0 ? actionsParts.join(", ") : "N/A";
+
+                    contextDataList.push(
+                        `รายงานเลขที่: ${report['Report No.'] || 'N/A'}, ` +
+                        `Tag No: ${report['Tag No.'] || 'N/A'}, ` +
+                        `รายละเอียด: ${report['Description'] || 'N/A'}, ` +
+                        `อาการ: ${symptomsStr}, ` +
+                        `การแก้ไข: ${actionsStr}, ` +
+                        `ผลการทดสอบก่อนซ่อม: ${report['Initial Result'] || 'N/A'}, ` +
+                        `ผลการทดสอบหลังซ่อม: ${report['Final Result'] || 'N/A'}`
+                    );
+                    if (contextDataList.length >= maxContextReports) { 
+                        break;
+                    }
+                }
+            }
+            
+            const contextData = contextDataList.join("\n");
+            console.log("Context data prepared (first 200 chars):", contextData.substring(0, 200) + '...');
+            return contextData;
+        }
+
+        /**
+         * ส่งคำถามไปยัง AI และแสดงผลลัพธ์
+         */
+        async function askAI() {
+            const question = questionInput.value.trim();
+            if (!question) {
+                aiResponse.value = "กรุณาพิมพ์คำถามของคุณ";
+                return;
+            }
+
+            if (allReports.length === 0) {
+                aiResponse.value = "ยังไม่ได้โหลดข้อมูลรายงาน กรุณารอสักครู่หรือรีเฟรชหน้าเว็บ";
+                return;
+            }
+
+            setStatus("กำลังถาม AI...", true);
+            aiResponse.value = ""; // Clear previous response
+
+            try {
+                const payload = {
+                    action: "ask",
+                    question: question,
+                    bodyText: processQuestionAndGetContext(question, allReports)
+                };
+
+                const response = await fetch(WEB_APP_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error("HTTP error during askAI:", response.status, errorText);
+                    throw new Error(`HTTP error! Status: ${response.status}. Response: ${errorText.substring(0, 100)}...`);
+                }
+
+                const data = await response.json();
+
+                if (data.status === 'success' && data.answer) {
+                    aiResponse.value = data.answer;
+                    setStatus("พร้อม");
+                } else {
+                    aiResponse.value = `ข้อผิดพลาดจาก AI: ${data.message || 'ไม่ทราบข้อผิดพลาด'}`;
+                    setStatus("เกิดข้อผิดพลาด", false);
+                }
+            } catch (error) {
+                console.error("Error asking AI:", error);
+                aiResponse.value = `ข้อผิดพลาดในการเชื่อมต่อ AI: ${error.message}`;
+                setStatus("เกิดข้อผิดพลาด", false);
+            }
+        }
+
+        // Event Listeners
+        askButton.addEventListener('click', askAI);
+        clearButton.addEventListener('click', () => {
+            questionInput.value = '';
+            aiResponse.value = '';
+            setStatus("พร้อม");
+        });
+
+        // โหลดข้อมูลรายงานเมื่อหน้าเว็บโหลดเสร็จ
+        document.addEventListener('DOMContentLoaded', fetchReports);
+    </script>
+</body>
+</html>
